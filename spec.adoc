@@ -102,19 +102,17 @@ In this way we have Protobuf-serialized mesh communications which the Gateway re
 
 https://github.com/romanz/electrs[Electrs] seems to be the best of the Electrum Server candidates available to date. Whilst the db usage is marginally higher than some alternatives, it includes no code for "other" cryptocurrencies (ElectrumX), requires minimal CPU/RAM to operate once the db is created and is performant. In addition to this, with the possibility that a Gateway might one day be an integrated system of some form, ElectrumX written in Python (and Electrum Personal Server, also Python not being suitable for this use-case), Electrs makes the most sense for this application.
 
-=== Extended Electrum API calls
+=== Electrum API protocol changes
 
-We want to extend the current Electrs API:
 
 . Merkle proof by txid: `mesh.get_merkle`
 * Does not require the `height` parameter, see <<Merkle merkle proof by txid>>
-* Potentially accepts an 8-byte short version of `tx_hash`
+* (Optional) accepts an 8-byte short version of `tx_hash`
 
 . Broadcast latest block headers in compressed format: `blockchain.cmpctheaders.broadcast()`
 * See <<Compressed blocks>>
 
 . Submit a raw transaction: `blockchain.transaction.broadcast(raw_tx)` (Further work)
-** Return the block height when the raw_tx was included in the mempool
 ** Accept raw_tx that uses 8-byte short version for transaction inputs
 
 === Electrum merkle proof by txid
