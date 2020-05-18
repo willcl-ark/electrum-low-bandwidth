@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package electrum;
+
+message GetMerkleProof {
+    bytes tx_hash = 1;
+    int32 height = 2;
+}
+
+message MerkleProof {
+    int32 height = 1;
+    repeated bytes merkle = 2;
+    int32 position = 3;
+}

@@ -1,0 +1,150 @@
+= Compressed block headers + merkle proofs over low bandwidth communications
+
+== Objectives
+
+* [x] Create draft BIP proposal for compressed block headers and post to dev mailing list
+* [ ] Clean up Electrum API proposal
+* [ ] Respond to feedback, update and refine draft proposals, implement tests to quantify bandwidth usage
+
+== Compressed Bitcoin block headers
+
+This has been drafted and submitted to the bitcoin-dev mailing list in this post: https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2020-May/017834.html[2020-May/017834]
+
+For further information on the proposed specification see document: https://github.com/willcl-ark/compressed-block-headers/blob/v1.0/compressed-block-headers.adoc[compressed-block-headers.adoc]
+
+The summary is that block headers can be compressed to approximately 49% of their original size without any loss of data.
+
+The proposed scheme outlines how this would apply to a full, genesis sync and also any partial header sync.
+
+It also includes information on a proposed 1 byte bitfield which would allow for easy implementation of header deserialisation. Whilst some additional compression is technically possible, this appears to be the optimum balance of compression and ease fo implementation.
+
+== Transaction merkle proofs over low-bandwidth links
+
+A system such that a client, who has been receiving compressed headers over a low bandwidth communications link, could also receive a proof that a transaction was included in a mined block. This would be in the form of a merkle branch.
+
+=== Terms
+
+Gateway:: An "online" node with both internet and mesh communications links
+Client:: An "offline" node with only a mesh communication link to one or more Gateways
+
+=== Operation
+
+* Gateways broadcast (compressed) block header updates via mesh link (ideally with Client re-broadcasting).
+* Gateways should respond to requests from Clients for historic block header updates.
+* Clients can submit a raw transaction to the Gateways.
+* Clients can query the status of a txid. The Gateways can provide proof of payment via a singular merkle proof for this txid.
+
+=== Merkle proofs
+
+Requested merkle proofs would take the form of an Electrum (https://en.bitcoin.it/wiki/BIP_0037[BIP37]) style proof -- for a particular transaction, the Gateway will respond with only a single merkle branch containing only information related to the requested transaction.
+
+Advantages::
+* Infrastructure: Can re-use current Electrum protocol server infrastructure.
+
+Disadvantages::
+** Privacy: Gateway knows exactly which transaction(s) you are interested in.
+
+It is important to consider that there exists a possible "withholding" attack, present in both implementations which is that the server can lie about inclusion: the transaction _was_ present in the block, but they don't provide you with a proof. This could possibly be overcome using economic incentives.
+
+=== Privacy concerns
+
+It was considered that using an available 'filter' approach might help to minimise some loss of privacy, however we outline some of the limitations of this below.
+
+When using any server-client model there are generally privacy trade-offs. In the Electrum Protocol/BIP37 model and it's associated bloom filters, there are well-known privacy problems, outlined in bitcoin.it wiki https://en.bitcoin.it/wiki/BIP37_privacy_problems[here]. These result in "essentially no privacy for anyone who uses it". BIP37 bloom filters are now disabled by default in Bitcoin Core which leads to the conclusion that, if it has not already happened, servers of these filters will become centralised if not outright malicious: e.g. run by chain surveillance companies.
+
+A newer version of the client-server model is now supported natively in Bitcoin Core (although also disabled by default): the "compact filters" of https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki[BIP157]. The two primary improvements of BIP157 over BIP37 are that:
+
+. Only a single filter is required for each block (rather than each peer), significantly reducing node resource requirements and consequent DoS attacks
+. Privacy leaks due to the bloom filter design are reduced -- with the caveat being that nodes who think they have a transaction matching the filter must request the entire block to see if they have a match.
+
+Point 2 however is a significant-enough negative factor for bandwidth-constrained connections that we do not consider it a potential candidate for our requirements.
+
+== Proposed implementation
+
+=== Privacy
+
+Because we are targeting off-grid communications (mesh networks) who are not IP-routed, we feel the privacy trade-offs from individual Electrum protocol merkle branch requests are somewhat, if not completely, mitigated via being an 'anonymous' radio-connected node with an ephemeral ID and ability to physically re-locate to avoid tracking by triangulation. When combined with the significantly lower bandwidth possible in this implementation we feel that the individual merkle branch request model is better suited for our purposes, whilst appreciating it's privacy limitations.
+
+=== Electrum Protocol
+
+In order to maximally leverage existing work done, it makes sense to use the current https://electrumx.readthedocs.io/en/latest/protocol.html[v1.4 Electrum protocol] wherever possible, and build any additional requirements on the top of that stack. For example:
+
+. The current protocol operates via a newline-terminated JSON request/response mechanism which can be significantly improved upon from a bandwidth perspective -- nJSON is ill-suited to transferring raw bytes such as transactions
+. We would also like to develop some API refinements which make sense for "offline" nodes requesting data from the Gateway.
+
+=== Gateway / Client communication
+
+From a compatibility standpoint, Google Protobuf as a serialisation and mesh transport layer seems to be a robust way to proceed. Protobuf supports https://developers.google.com/protocol-buffers/docs/reference/csharp/class/google/protobuf/json-formatter[JSON reflection] which means that we can use protobuf to transfer over the bandwidth-constrained mesh layer and then totally re-use existing Electrum Server infrastructure, namely Electrs and ElectrumX.
+
+In this way we have Protobuf-serialized mesh communications which the Gateway reflects into a local Electrum Server for processing, e.g. Electrs, and then returns to the Client again using Protobufs.
+
+=== Electrum Sever
+
+https://github.com/romanz/electrs[Electrs] seems to be the best of the Electrum Server candidates available to date. Whilst the db usage is marginally higher than some alternatives, it includes no code for "other" cryptocurrencies (ElectrumX), requires minimal CPU/RAM to operate once the db is created and is performant. In addition to this, with the possibility that a Gateway might one day be an integrated system of some form, ElectrumX written in Python (and Electrum Personal Server, also Python not being suitable for this use-case), Electrs makes the most sense for this application.
+
+=== Extended Electrum API calls
+
+We want to extend the current Electrs API:
+
+. Merkle proof by txid: `mesh.get_merkle`
+* Does not require the `height` parameter, see <<Merkle merkle proof by txid>>
+* Potentially accepts an 8-byte short version of `tx_hash`
+
+. Broadcast latest block headers in compressed format: `blockchain.cmpctheaders.broadcast()`
+* See <<Compressed blocks>>
+
+. Submit a raw transaction: `blockchain.transaction.broadcast(raw_tx)` (Further work)
+** Return the block height when the raw_tx was included in the mempool
+** Accept raw_tx that uses 8-byte short version for transaction inputs
+
+=== Electrum merkle proof by txid
+
+Currently this API query is available (as `blockchain.transaction.get_merkle`), however it requires you to also provide `block_height` at query time. This is not assumed to be known by the offline mesh user, so we will need to modify the electrs API to provide merkle_proof by txid only.
+
+It is our understanding that the `blockheight` parameter here is a requirement to satisfy the "duplicate transactions" problem solved via https://github.com/bitcoin/bips/blob/master/bip-0030.mediawiki[BIP30]. Since only two historical blocks contain these duplicate txids, for any new transaction made today, blockheight is not a necessary practical requirement.
+
+Electrs appears to already be using `txid: blockheight` in it's https://github.com/willcl-ark/electrs/blob/master/doc/schema.md#full-transaction-ids[db schema].
+
+Blockstream's https://github.com/Blockstream/esplora/blob/master/API.md[Esplora API] also appears to already have designed this call https://github.com/Blockstream/esplora/blob/master/API.md#get-txtxidmerkle-proof[here].
+
+==== Example query
+
+----
+mesh.get_merkle("d13e71bddca3545385f61c08975886da3df10bc2290af6464b6714cf035ead70")
+
+----
+
+* The above request using nJSON is 84B
+* The above request using protobuf is ... #TODO
+
+Returns:
+
+----
+{
+     "block_height": 627847,
+     "merkle": [
+         "2e2fb0079897ce50d3a8919c4a45b45c400487ff8957141b0bb49711a92222de",
+         "dd0c61ba301faf599e42acea97b21550c6a2ae356a18cd9dac2fcd48cab7fe89",
+         "2b2612bf73d0aa03411bd9b73c0c6ca92492cfcc645201715cd686aab3617009",
+         "5211dcf4a778c2bf2d3682a4df98cc49e6b24d8fbd2549b84571453ad267e359",
+         "4116461635d14254cd4d2a7e1ef20060fce8c3292e5ca84dca0235ffcbeb3b9d",
+         "af92e0261c6f89c0b9246a3d82026dd49a6603f480de35cb60841d408429867e",
+         "b27deb1acf7207d1c3b613b420a202257a21af28d5a7ef1501d5aec19964c08e",
+         "31399583009591b8ba9c330016f5c5726f8d9124f24eefe5709ce1a7d82844e7",
+         "b63d8e275ef1edd647ac24b8eaf8d91f5a3cc665ec377c5c7638988533c296e8",
+         "1876b504650bce56bb622edc65ce2cb063d211dd4f4b9d9f1e977b46c7699997",
+         "d8b69ee43e0dd393535a200fde68a1ed425c8de5a024a5ee36782925e6c231b1",
+         "60e1fe84bfe8d26ec93eeabec1a79b1415b20f963219ae2e5f05ed75bf6399e2",
+     ],
+     "pos": 0,
+ }
+----
+
+* The above merkle proof using nJSON is 880B
+* The above merkle proof using protobuf is 381B
+
+== Further work
+
+Once the above is implemented, we can look at further objectives:
+
+. Reducing `rawtransaction` size: use truncated input identifiers, e.g. last 8 bytes like lightning short_channel_id
