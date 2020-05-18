@@ -20,7 +20,7 @@ It also includes information on a proposed 1 byte bitfield which would allow for
 
 == Transaction merkle proofs over low-bandwidth links
 
-A system such that a client, who has been receiving compressed headers over a low bandwidth communications link, could also receive a proof that a transaction was included in a mined block. This would be in the form of a merkle branch.
+A system such that a Client, who has been receiving compressed block headers over a low bandwidth communications link, could also receive a proof that a particular transaction was included in a mined block on the longest chain. If the provided merkle branch can  be combined with a valid block header chain it forms a cryptographic proof-of-inclusion.
 
 === Terms
 
@@ -36,7 +36,7 @@ Client:: An "offline" node with only a mesh communication link to one or more Ga
 
 === Merkle proofs
 
-Requested merkle proofs would take the form of an Electrum (https://en.bitcoin.it/wiki/BIP_0037[BIP37]) style proof -- for a particular transaction, the Gateway will respond with only a single merkle branch containing only information related to the requested transaction.
+Requested merkle proofs would take the form of an Electrum (https://en.bitcoin.it/wiki/BIP_0037[BIP37]) style proof: for a particular transaction, the Gateway will respond with a single merkle branch containing only information related to the requested transaction.
 
 Advantages::
 * Infrastructure: Can re-use current Electrum protocol server infrastructure.
@@ -48,22 +48,42 @@ It is important to consider that there exists a possible "withholding" attack, p
 
 === Privacy concerns
 
-It was considered that using an available 'filter' approach might help to minimise some loss of privacy, however we outline some of the limitations of this below.
+When using any server-client model there are generally privacy trade-offs. It was considered that using an available 'filter' approach might help to minimise some loss of privacy, however we outline some of the limitations of this below.
 
-When using any server-client model there are generally privacy trade-offs. In the Electrum Protocol/BIP37 model and it's associated bloom filters, there are well-known privacy problems, outlined in bitcoin.it wiki https://en.bitcoin.it/wiki/BIP37_privacy_problems[here]. These result in "essentially no privacy for anyone who uses it". BIP37 bloom filters are now disabled by default in Bitcoin Core which leads to the conclusion that, if it has not already happened, servers of these filters will become centralised if not outright malicious: e.g. run by chain surveillance companies.
+=== Filters
 
-A newer version of the client-server model is now supported natively in Bitcoin Core (although also disabled by default): the "compact filters" of https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki[BIP157]. The two primary improvements of BIP157 over BIP37 are that:
+We have considered the use of existing bitcoin filter systems for this use-case, but find them lacking in the ways detailed below.
 
-. Only a single filter is required for each block (rather than each peer), significantly reducing node resource requirements and consequent DoS attacks
-. Privacy leaks due to the bloom filter design are reduced -- with the caveat being that nodes who think they have a transaction matching the filter must request the entire block to see if they have a match.
+==== BIP37 Filters
 
-Point 2 however is a significant-enough negative factor for bandwidth-constrained connections that we do not consider it a potential candidate for our requirements.
+In the Electrum Protocol/BIP37 model and it's associated bloom filters, there are well-known privacy problems, outlined in bitcoin.it wiki https://en.bitcoin.it/wiki/BIP37_privacy_problems[here]. These result in "essentially no privacy for anyone who uses it".
+
+Advantages::
+* Current infrastructure exists.
+* Bloom filters and their results are more lightweight than BIP157 equivalents.
+
+Disadvantages::
+* Bad privacy from bloom filters.
+* BIP37 bloom filters are now disabled by default in Bitcoin Core which leads to the conclusion that, if it has not already happened, servers of these filters will become centralised if not outright malicious: e.g. run by chain surveillance companies.
+* Merkle blocks much larger than merkle branches.
+
+==== BIP 157 Filters
+
+A newer version of the client-server model is now supported natively in Bitcoin Core (although also disabled by default): the "compact filters" of https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki[BIP157].
+
+Advantages::
+* Only a single filter is required for each block (rather than each peer), significantly reducing node resource requirements and consequent DoS attacks
+* Privacy leaks due to the bloom filter design are reduced.
+
+Disadvantages::
+* Bandwidth requirements:
+** When a filter is matched, nodes must request the entire block to confirm they have a match.
+
+==== Filters Conclusion
+
+Due to the above limitations of the two filter implementations, primarily relating to the bandwidth requirements, we propose to select a pure merkle branch system.
 
 == Proposed implementation
-
-=== Privacy
-
-Because we are targeting off-grid communications (mesh networks) who are not IP-routed, we feel the privacy trade-offs from individual Electrum protocol merkle branch requests are somewhat, if not completely, mitigated via being an 'anonymous' radio-connected node with an ephemeral ID and ability to physically re-locate to avoid tracking by triangulation. When combined with the significantly lower bandwidth possible in this implementation we feel that the individual merkle branch request model is better suited for our purposes, whilst appreciating it's privacy limitations.
 
 === Electrum Protocol
 
@@ -114,8 +134,8 @@ mesh.get_merkle("d13e71bddca3545385f61c08975886da3df10bc2290af6464b6714cf035ead7
 
 ----
 
-* The above request using nJSON is 84B
-* The above request using protobuf is ... #TODO
+* The above request serialised using nJSON is 84B
+* The above request serialised using protobuf is 34B, 59% smaller.
 
 Returns:
 
@@ -140,8 +160,16 @@ Returns:
  }
 ----
 
-* The above merkle proof using nJSON is 880B
-* The above merkle proof using protobuf is 381B
+* The above merkle proof serialised using nJSON is 880B
+* The above merkle proof serialised using protobuf is 381B, 56% smaller.
+
+=== Privacy
+
+Because we are targeting off-grid communications (mesh networks) who are not IP-routed, we feel the privacy trade-offs from individual Electrum protocol merkle branch requests are somewhat, if not completely, mitigated via being an 'anonymous' radio-connected node with an ephemeral ID and ability to physically re-locate to avoid tracking by triangulation.
+
+In addition to this, in a mesh network the clients closest to the gateway will act as relay for others in the mesh, making it harder to correlate requested proofs and clients without monitoring more of the mesh itself to trace a multi-hop message.
+
+When combined with the significantly lower bandwidth possible in this implementation we feel that the individual merkle branch request model is better suited for our purposes, whilst appreciating it's privacy limitations.
 
 == Further work
 
