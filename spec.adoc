@@ -1,0 +1,169 @@
+= Compressed block headers & merkle proofs over low bandwidth communications
+Will Clark <will8clark@gmail.com>
+v1.0, May 2020:
+:toc: preamble
+:toclevels: 4
+
+A system such that a Client, who has been receiving compressed block headers over a low bandwidth communications link from a Gateway, could request a proof, in the form of a merkle path, that a transaction was included in a mined block on the valid chain with the most work.
+
+If the merkle path can be verified against a valid block header chain, it forms a cryptographic proof-of-inclusion. See <<Censorship>> for some possible shortcomings of this system.
+
+== Transaction proofs over low-bandwidth links
+
+=== Terms
+
+Gateway:: An "online" node with both a high-bandwidth internet connection and a low-bandwidth communications link to one or more Clients.
+Client:: An "offline" node with only a low-bandwidth communications link to one or more Gateways and one or more other Clients.
+Low-bandwidth link:: Either a physically low-bandwidth connection e.g. mesh/radio/Tor, or a high-cost metered connection e.g. mobile data/SMS, which results in desire for minimisation of data transferred.
+Metered link:: A connection that has a relatively high cost per unit of data transferred.
+Merkle path:: The path in the merkle tree from the transaction to the block's merkle root footnote:[https://github.com/bitcoinbook/bitcoinbook/blob/4e87168621aa08e42f96a79997359c6738cb1ffb/ch09.asciidoc#merkle-trees]. Also known as a "merkle branch".
+
+=== Compressed block headers
+
+A proposal has been drafted and submitted to the bitcoin-dev mailing list in this post: https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2020-May/017834.html[2020-May/017834] footnote:[https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2020-May/017834.html]
+
+For further information on the proposed specification see document: https://github.com/willcl-ark/compressed-block-headers/blob/v1.0/compressed-block-headers.adoc[compressed-block-headers.adoc] footnote:[https://github.com/willcl-ark/compressed-block-headers/blob/v1.0/compressed-block-headers.adoc]
+
+The summary is that block headers can be compressed to approximately 49% of their original size without any loss of data.
+
+The scheme outlines how this would apply to a full sync (from Genesis) and also any partially-ranged header sync.
+
+The scheme also includes information on a proposed 1 byte bit field which would provide easier header deserialisation. Whilst some additional compression is technically possible, this appears to be a good balance of compression and ease of implementation.
+
+=== Merkle proofs
+
+Merkle proofs should take the form of an Electrum-style merkle proof footnote:[https://electrumx.readthedocs.io/en/latest/protocol-methods.html#blockchain-transaction-get-merkle]: for a particular transaction referenced by txid, the Gateway will respond with a single merkle path containing only information directly related to the requested transaction.
+
+Advantages::
+* Infrastructure: Can re-use current Electrum Protocol software and server infrastructure.
+
+Disadvantages::
+** Privacy: Gateway knows exactly which transaction(s) you are interested in.
+** Censorship: Gateways can selectively choose to not report that a transaction has been included in a block.
+
+=== Privacy concerns
+
+When using any server-client model there are generally privacy trade-offs, we outline some details of those below.
+
+==== Censorship
+
+As previously mentioned, it is important to acknowledge that there exists a possible "withholding" attack, where a server can lie about the inclusion of a transaction that _was_ present in a block, but they do not provide the proof. This could possibly be overcome using economic incentives or by querying multiple Gateways.
+
+==== Block filters
+
+Using a 'filter' approach, e.g. BIP37 footnote:[https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki] or BIP157 footnote:[https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki], can help to minimise some loss of privacy, however existing bitcoin filter systems make trade-offs between privacy and bandwidth. We find these filters unsuitable for this application due to trade-offs made. Instead, we select a simple merkle path proof that is purely optimized for low-bandwidth usage.
+
+Clients that use centralized IP-routed networks should use mix-nets like Tor when requesting merkle path proofs, or instead use the BIP-157/158 filter system to protect transaction privacy.
+
+==== Mitigation
+
+Clients can mitigate the privacy reduction from directly querying a Gateway for merkle paths by using p2p radio communication networks and ephemeral IDs not tied to a Client’s exact location or other personally identifying information. These clients can also physically relocate to avoid tracking by radio triangulation.
+
+In addition to this, Clients in a mesh network closest to the Gateway will act as relays for others in the mesh, making it harder to correlate requested proofs with specific Clients without physically monitoring more of the mesh itself to trace a multi-hop message.
+
+Combined with the significantly lower bandwidth possible for this approach we feel that the individual merkle path request model is better suited for our purposes, whilst appreciating its privacy limitations.
+
+=== Implementation
+
+* Gateways can broadcast compressed block header updates via low-bandwidth links to subscribed Clients. Clients may re-broadcast these headers amongst themselves.
+* Gateways can also serve Clients historic compressed block header ranges.
+* Clients can submit raw transactions to the Gateways for injection into the Bitcoin P2P network.
+* Clients can query the status of a transaction with one or multiple Gateways. The Gateways can provide "proof of payment" via a singular merkle path back to the merkle root of the block it was included in.
+
+==== Electrum Protocol
+
+In order to maximally leverage current infrastructure, we propose to iterate on the current v1.4.1 Electrum protocol footnote:[https://electrumx.readthedocs.io/en/latest/protocol.html] wherever possible, and build any additional requirements on the top of that stack.
+
+We like to propose a protocol spec bump (e.g. to v1.5.0) which includes some API refinements that make sense for low-bandwidth nodes as well as the current Client population at large. Namely:
+
+. `blockchain.transaction.get_merkle`
+* Modification of an existing method
+* Make `height` an optional parameter, now safe since BIP30 footnote:[https://github.com/bitcoin/bips/blob/master/bip-0030.mediawiki]
+* Add an additional `transaction_index` field to the return values in addition to the `block_height` so that a short_channel_id can be created for the transaction’s outputs.
+* See <<Blockchain.transaction.get_merkle>> below
+
+. `blockchain.headers2.subscribe`
+* New method
+* To broadcast new block headers in compressed format
+* Compressed headers might be supported from Bitcoin Core directly, or as a fallback could be generated on-the-fly at the Electrum Server level.
+* See <<Compressed block headers>>
+
+. `blockchain.block.headers2`
+* New method to request a concatenated chunk of compressed headers
+* See <<Compressed block headers>>
+
+. `blockchain.transaction.broadcast(raw_tx)` (further work)
+* Modification of an existing method
+* Accept raw_tx that uses 8-byte short version for transaction inputs
+
+==== Blockchain.transaction.get_merkle
+
+As described above this method requires a `block_height` parameter. This is not assumed to be known by the low-bandwidth/offline Client, so we propose modification to the Electrum Protocol to provide merkle_proof based on txid only.
+
+It is our understanding that the parameter is a requirement to satisfy the "duplicate transactions" problem solved via https://github.com/bitcoin/bips/blob/master/bip-0030.mediawiki[BIP30]. Since only two historical blocks contain these duplicate txids, for any new transaction made today, blockheight is not a necessary practical requirement.
+
+To avoid edge-cases, it may make sense to hard-code the two offending block heights into the software as Bitcoin Core does in commit `ab91bf3`.
+
+==== Gateway / Client communication
+
+From a compatibility standpoint, Google Protobuf as a serialisation and low-bandwidth transport layer seems to be a robust way to proceed. Protobuf supports https://developers.google.com/protocol-buffers/docs/reference/csharp/class/google/protobuf/json-formatter[JSON reflection] which means that we can use protobuf to transfer over the bandwidth-constrained layer and then re-use existing Electrum Server infrastructure.
+
+In this way we have Protobuf-serialized low-bandwidth communications which the Gateway reflects into a local Electrum Server for processing and then returns responses to the Client protobuf-serialised.
+
+===== (n) JSON vs Protobuf
+
+Here we simulate the request of a merkle path for transaction id `d13e71bddca3545385f61c08975886da3df10bc2290af6464b6714cf035ead70`, with the request shown in the current nJSON format:
+
+----
+blockchain.transaction.get_merkle("d13e71bddca3545385f61c08975886da3df10bc2290af6464b6714cf035ead70")
+----
+
+* The request serialised using nJSON is 165B
+* The request serialised using protobuf is 34B, or 79% smaller.
+
+This request returns the following merkle path response:
+
+----
+{
+     "block_height": 627847,
+     "merkle": [
+         "2e2fb0079897ce50d3a8919c4a45b45c400487ff8957141b0bb49711a92222de",
+         "dd0c61ba301faf599e42acea97b21550c6a2ae356a18cd9dac2fcd48cab7fe89",
+         "2b2612bf73d0aa03411bd9b73c0c6ca92492cfcc645201715cd686aab3617009",
+         "5211dcf4a778c2bf2d3682a4df98cc49e6b24d8fbd2549b84571453ad267e359",
+         "4116461635d14254cd4d2a7e1ef20060fce8c3292e5ca84dca0235ffcbeb3b9d",
+         "af92e0261c6f89c0b9246a3d82026dd49a6603f480de35cb60841d408429867e",
+         "b27deb1acf7207d1c3b613b420a202257a21af28d5a7ef1501d5aec19964c08e",
+         "31399583009591b8ba9c330016f5c5726f8d9124f24eefe5709ce1a7d82844e7",
+         "b63d8e275ef1edd647ac24b8eaf8d91f5a3cc665ec377c5c7638988533c296e8",
+         "1876b504650bce56bb622edc65ce2cb063d211dd4f4b9d9f1e977b46c7699997",
+         "d8b69ee43e0dd393535a200fde68a1ed425c8de5a024a5ee36782925e6c231b1",
+         "60e1fe84bfe8d26ec93eeabec1a79b1415b20f963219ae2e5f05ed75bf6399e2",
+     ],
+     "pos": 0,
+ }
+----
+
+* The above merkle path serialised using nJSON is 805B
+* The above merkle path serialised using protobuf is 381B, or 53% smaller.
+
+
+=== Roadmap
+
+Phase 1::
++
+* Propose Electrum Protocol version bump where `block_height` will become an optional parameter for API methods (backwards compatible).
+
+Phase 2::
++
+* Create a protobuf reflector to work on top of an Electrum Protocol Server to significantly reduce bandwidth between Gateway and Client
++
+* Add support for compressed block headers to Electrum Protocol (with another version bump). Either generated by Bitcoin Core or generated by Electrum directly. If neither project accepts this change possible they could instead be generated by the Protobuf serialiser on-the-fly.
+
+=== Further work
+
+Once the above is implemented, we can look at further objectives:
+
+. Reducing `rawtransaction` size: use truncated input identifiers, e.g. 8 bytes like lightning short_channel_id
+. Modify `blockchain.transaction.get_merkle` to accept an 8-byte or 20-byte short version of `tx_hash`
+. Modify `blockchain.transaction.get_merkle` to return a branch that includes multiple transactions from the same block to reduce the overall communication required to communicate redundant information to low-bandwidth peers.
