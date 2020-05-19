@@ -2,20 +2,32 @@ import json
 import electrum_pb2
 
 
-# Using google protobuf results in all `bytes` fields being 3/4 their Base64 encoded JSON size
-# Additionally, message sizes are smaller
+# Request parameters
+txid = "e41e875d21861a7f43168010b123895cb74116d5dfe009ac743265cb7495546a"
+block_height = 450538
 
-request = electrum_pb2.GetMerkleProof(
-    tx_hash=bytes.fromhex(
-        "e41e875d21861a7f43168010b123895cb74116d5dfe009ac743265cb7495546a"
+
+# JSON request, positional structure
+json_request = (
+    json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "method": "blockchain.transaction.get_merkle",
+            "params": [txid, block_height],
+            "id": "0",
+        }
     )
+    + "\n"
 )
 
 
-# Response params
-block_height = 450538
+# Protobuf request
+protobuf_request = electrum_pb2.GetMerkleProof(tx_hash=bytes.fromhex(txid))
+
+
+# Response parameters
 pos = 710
-merkle = [
+merkle_path = [
     "713d6c7e6ce7bbea708d61162231eaa8ecb31c4c5dd84f81c20409a90069cb24",
     "03dbaec78d4a52fbaf3c7aa5d3fccd9d8654f323940716ddf5ee2e4bda458fde",
     "e670224b23f156c27993ac3071940c0ff865b812e21e0a162fe7a005d6e57851",
@@ -29,14 +41,25 @@ merkle = [
     "2d64851151550e8c4d337f335ee28874401d55b358a66f1bafab2c3e9f48773d",
 ]
 
-# JSON response
-json_response = json.dumps({"merkle": merkle, "block_height": block_height, "pos": pos})
-print(f"Size of json response message: {len(json_response)}")
+# JSON response, positional structure
+json_response = (
+    json.dumps(
+        {"jsonrpc": "2.0", "result": [merkle_path, block_height, pos], "id": "0",}
+    )
+    + "\n"
+)
 
 
 # Protobuf response
-merkle_proto = [bytes.fromhex(txid) for txid in merkle]
+merkle_proto = [bytes.fromhex(txid) for txid in merkle_path]
 merkle_response = electrum_pb2.MerkleProof(
     height=int(block_height), merkle=merkle_proto, position=int(pos)
 )
-print(f"Size of protobuf response message: {merkle_response.ByteSize()}")
+
+
+# Results
+w = 36  # width
+print(f"{'Size of json request:':{w}}{len(json_request)}")
+print(f"{'Size of protobuf request:':{w}}{protobuf_request.ByteSize()}")
+print(f"{'Size of json response message:':{w}}{len(json_response)}")
+print(f"{'Size of protobuf response message:':{w}}{merkle_response.ByteSize()}")
