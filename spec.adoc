@@ -1,6 +1,6 @@
 = Compressed block headers & merkle proofs over low bandwidth communications
 Will Clark <will8clark@gmail.com>
-v1.0, May 2020:
+v1.1, May 2020:
 :toc: preamble
 :toclevels: 4
 
