@@ -78,7 +78,7 @@ We like to propose a protocol spec bump (e.g. to v1.5.0) which includes some API
 
 . `blockchain.transaction.get_merkle`
 * Modification of an existing method
-* Make `height` an optional parameter, now safe since BIP30 footnote:[https://github.com/bitcoin/bips/blob/master/bip-0030.mediawiki]
+* Make `height` an optional parameter, now safe since BIP30 footnote:[https://github.com/bitcoin/bips/blob/master/bip-0030.mediawiki] and BIP34 footnote:[https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki]
 * Add an additional `transaction_index` field to the return values in addition to the `block_height` so that a short_channel_id can be created for the transaction’s outputs.
 * See <<Blockchain.transaction.get_merkle>> below
 
@@ -100,7 +100,7 @@ We like to propose a protocol spec bump (e.g. to v1.5.0) which includes some API
 
 As described above this method requires a `block_height` parameter. This is not assumed to be known by the low-bandwidth/offline Client, so we propose modification to the Electrum Protocol to provide merkle_proof based on txid only.
 
-It is our understanding that the parameter is a requirement to satisfy the "duplicate transactions" problem solved via https://github.com/bitcoin/bips/blob/master/bip-0030.mediawiki[BIP30]. Since only two historical blocks contain these duplicate txids, for any new transaction made today, blockheight is not a necessary practical requirement.
+The `block_height` parameter is a requirement to satisfy the "duplicate transactions" problem solved via a combination of https://github.com/bitcoin/bips/blob/master/bip-0030.mediawiki[BIP30] and https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki[BIP34]. Since only two historical blocks contain these duplicate txids, for any new transaction made today, blockheight is not a necessary practical requirement.
 
 To avoid edge-cases, it may make sense to hard-code the two offending block heights into the software as Bitcoin Core does in commit `ab91bf3`.
 
