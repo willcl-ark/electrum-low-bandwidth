@@ -30,6 +30,8 @@ The scheme outlines how this would apply to a full sync (from Genesis) and also 
 
 The scheme also includes information on a proposed 1 byte bit field which would provide easier header deserialisation. Whilst some additional compression is technically possible, this appears to be a good balance of compression and ease of implementation.
 
+It should be noted that we are not recommending that headers are stored on disk by either the Server or Client in compressed form (although at the Client end they could be), rather that the compressed headers are used when serialising vectors of headers to be sent across the transport layer.
+
 === Merkle proofs
 
 Merkle proofs should take the form of an Electrum-style merkle proof footnote:[https://electrumx.readthedocs.io/en/latest/protocol-methods.html#blockchain-transaction-get-merkle]: for a particular transaction referenced by txid, the Gateway will respond with a single merkle path containing only information directly related to the requested transaction.
